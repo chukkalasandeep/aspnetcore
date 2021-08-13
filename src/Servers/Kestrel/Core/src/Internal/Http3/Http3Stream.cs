@@ -73,8 +73,9 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
         public KestrelServerLimits Limits => _context.ServiceContext.ServerOptions.Limits;
         public long StreamId => _streamIdFeature.StreamId;
 
-        public long HeaderTimeoutTicks { get; set; }
-        public bool ReceivedHeader => _appCompleted != null; // TCS is assigned once headers are received
+        public long StreamTimeoutTicks { get; set; }
+        public bool IsReceivingHeader => _appCompleted == null; // TCS is assigned once headers are received
+        public bool IsDraining => _appCompleted?.Task.IsCompleted ?? false; // Draining starts once app is complete
 
         public bool IsRequestStream => true;
 
@@ -97,7 +98,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
             _totalParsedHeaderSize = 0;
             _isMethodConnect = false;
             _completionState = default;
-            HeaderTimeoutTicks = 0;
+            StreamTimeoutTicks = 0;
 
             if (_frameWriter == null)
             {
@@ -503,10 +504,14 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                 {
                     ApplyCompletionFlag(StreamCompletionFlags.Completed);
 
-                    // Tells the connection to remove the stream from its active collection.
-                    _context.StreamLifetimeHandler.OnStreamCompleted(this);
+                    _context.StreamContext.Features.Get<IConnectionCompleteFeature>()!.OnCompleted(static (state) =>
+                    {
+                        var s = (Http3Stream)state;
+                        // Tells the connection to remove the stream from its active collection.
+                        s._context.StreamLifetimeHandler.OnStreamCompleted(s);
+                        return Task.CompletedTask;
+                    }, this);
 
-                    // Dispose must happen after stream is no longer active.
                     await _context.StreamContext.DisposeAsync();
                 }
             }
@@ -627,6 +632,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
             }
 
             _appCompleted = new TaskCompletionSource();
+            StreamTimeoutTicks = default;
             _context.StreamLifetimeHandler.OnStreamHeaderReceived(this);
 
             ThreadPool.UnsafeQueueUserWorkItem(this, preferLocal: false);

@@ -1384,6 +1384,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             {
                 _realTimeoutControl.Tick(now);
             }
+
+            public long GetWriteTimingTimeoutTimestamp()
+            {
+                return _realTimeoutControl.GetWriteTimingTimeoutTimestamp();
+            }
         }
     }
 }

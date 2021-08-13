@@ -4,12 +4,14 @@
 using System.Net.Sockets;
 using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Connections.Features;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
 {
-    internal sealed partial class QuicStreamContext : IPersistentStateFeature, IStreamDirectionFeature, IProtocolErrorCodeFeature, IStreamIdFeature, IStreamAbortFeature
+    internal sealed partial class QuicStreamContext : IPersistentStateFeature, IStreamDirectionFeature, IProtocolErrorCodeFeature, IStreamIdFeature, IStreamAbortFeature, IConnectionCompleteFeature
     {
         private IDictionary<object, object?>? _persistentState;
+        private Stack<KeyValuePair<Func<object, Task>, object>>? _onCompleted;
 
         public bool CanRead { get; private set; }
         public bool CanWrite { get; private set; }
@@ -31,15 +33,18 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
         {
             lock (_shutdownLock)
             {
-                if (_stream.CanRead)
+                if (_stream != null)
                 {
-                    _shutdownReadReason = abortReason;
-                    _log.StreamAbortRead(this, errorCode, abortReason.Message);
-                    _stream.AbortRead(errorCode);
-                }
-                else
-                {
-                    throw new InvalidOperationException("Unable to abort reading from a stream that doesn't support reading.");
+                    if (_stream.CanRead)
+                    {
+                        _shutdownReadReason = abortReason;
+                        _log.StreamAbortRead(this, errorCode, abortReason.Message);
+                        _stream.AbortRead(errorCode);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Unable to abort reading from a stream that doesn't support reading.");
+                    }
                 }
             }
         }
@@ -48,15 +53,84 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
         {
             lock (_shutdownLock)
             {
-                if (_stream.CanWrite)
+                if (_stream != null)
                 {
-                    _shutdownWriteReason = abortReason;
-                    _log.StreamAbortWrite(this, errorCode, abortReason.Message);
-                    _stream.AbortWrite(errorCode);
+                    if (_stream.CanWrite)
+                    {
+                        _shutdownWriteReason = abortReason;
+                        _log.StreamAbortWrite(this, errorCode, abortReason.Message);
+                        _stream.AbortWrite(errorCode);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Unable to abort writing to a stream that doesn't support writing.");
+                    }
                 }
-                else
+            }
+        }
+
+        public void OnCompleted(Func<object, Task> callback, object state)
+        {
+            if (_onCompleted == null)
+            {
+                _onCompleted = new Stack<KeyValuePair<Func<object, Task>, object>>();
+            }
+            _onCompleted.Push(new KeyValuePair<Func<object, Task>, object>(callback, state));
+        }
+
+        private Task FireOnCompletedAsync()
+        {
+            var onCompleted = _onCompleted;
+
+            if (onCompleted == null || onCompleted.Count == 0)
+            {
+                return Task.CompletedTask;
+            }
+
+            return CompleteAsyncMayAwait(onCompleted);
+        }
+
+        private Task CompleteAsyncMayAwait(Stack<KeyValuePair<Func<object, Task>, object>> onCompleted)
+        {
+            while (onCompleted.TryPop(out var entry))
+            {
+                try
                 {
-                    throw new InvalidOperationException("Unable to abort writing to a stream that doesn't support writing.");
+                    var task = entry.Key.Invoke(entry.Value);
+                    if (!task.IsCompletedSuccessfully)
+                    {
+                        return CompleteAsyncAwaited(task, onCompleted);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
+                }
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private async Task CompleteAsyncAwaited(Task currentTask, Stack<KeyValuePair<Func<object, Task>, object>> onCompleted)
+        {
+            try
+            {
+                await currentTask;
+            }
+            catch (Exception ex)
+            {
+                _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
+            }
+
+            while (onCompleted.TryPop(out var entry))
+            {
+                try
+                {
+                    await entry.Key.Invoke(entry.Value);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
                 }
             }
         }
@@ -68,6 +142,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
             _currentIProtocolErrorCodeFeature = this;
             _currentIStreamIdFeature = this;
             _currentIStreamAbortFeature = this;
+            _currentIConnectionCompleteFeature = this;
         }
     }
 }

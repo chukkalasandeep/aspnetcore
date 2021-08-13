@@ -24,6 +24,11 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Microbenchmarks
         {
         }
 
+        public long GetWriteTimingTimeoutTimestamp()
+        {
+            return 0;
+        }
+
         public void InitializeHttp2(InputFlowControl connectionInputFlowControl)
         {
         }

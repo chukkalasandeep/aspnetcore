@@ -330,5 +330,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Infrastructure
 
             ResetTimeout(timeSpan.Ticks, TimeoutReason.TimeoutFeature);
         }
+
+        public long GetWriteTimingTimeoutTimestamp()
+        {
+            return _writeTimingTimeoutTimestamp;
+        }
     }
 }

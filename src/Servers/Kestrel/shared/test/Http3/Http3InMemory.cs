@@ -608,6 +608,12 @@ namespace Microsoft.AspNetCore.Testing
         public bool Disposed => _testStreamContext.Disposed;
         public Task OnDisposedTask => _testStreamContext.OnDisposedTask;
 
+        public TaskCompletionSource StartStreamDisposeTcs
+        {
+            get => _testStreamContext.StartStreamDisposeTcs;
+            internal set => _testStreamContext.StartStreamDisposeTcs = value;
+        }
+
         public Http3RequestStream(Http3InMemory testBase, Http3Connection connection, TestStreamContext testStreamContext, Http3RequestHeaderHandler headerHandler)
             : base(testStreamContext)
         {
@@ -1068,6 +1074,8 @@ namespace Microsoft.AspNetCore.Testing
             Disposed = false;
         }
 
+        public TaskCompletionSource StartStreamDisposeTcs { get; internal set; }
+
         public ConnectionAbortedException AbortReadException { get; private set; }
         public ConnectionAbortedException AbortWriteException { get; private set; }
 
@@ -1107,8 +1115,13 @@ namespace Microsoft.AspNetCore.Testing
             _pair.Application.Output.Complete(abortReason);
         }
 
-        public override ValueTask DisposeAsync()
+        public override async ValueTask DisposeAsync()
         {
+            if (StartStreamDisposeTcs != null)
+            {
+                await StartStreamDisposeTcs.Task;
+            }
+
             _testBase.Logger.LogDebug($"Disposing stream {StreamId}");
 
             var readerCompletedSuccessfully = _transportPipeReader.IsCompletedSuccessfully;
@@ -1132,8 +1145,6 @@ namespace Microsoft.AspNetCore.Testing
 
             Disposed = true;
             _disposedTcs.TrySetResult();
-
-            return ValueTask.CompletedTask;
         }
 
         internal void Complete()

@@ -17,14 +17,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
         /// Used to track the timeout between when the stream was started by the client, and getting a header.
         /// Value is driven by <see cref="KestrelServerLimits.RequestHeadersTimeout"/>.
         /// </summary>
-        long HeaderTimeoutTicks { get; set; }
+        long StreamTimeoutTicks { get; set; }
 
         /// <summary>
         /// The stream has received and parsed the header frame.
         /// - Request streams = HEADERS frame.
         /// - Control streams = unidirectional stream header.
         /// </summary>
-        bool ReceivedHeader { get; }
+        bool IsReceivingHeader { get; }
+
+        bool IsDraining { get; }
 
         bool IsRequestStream { get; }
 
