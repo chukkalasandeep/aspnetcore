@@ -176,11 +176,17 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                 return;
             }
 
-            UpdateStartingStreams(now);
+            UpdateStreamTimeouts(now);
         }
 
-        private void UpdateStartingStreams(DateTimeOffset now)
+        private void UpdateStreamTimeouts(DateTimeOffset now)
         {
+            // This method checks for timeouts:
+            // 1. When a stream first starts and waits to receive headers.
+            //    Uses RequestHeadersTimeout.
+            // 2. When a stream finished and is waiting for underlying transport to drain.
+            //    Uses MinResponseDataRate.
+
             var ticks = now.Ticks;
 
             lock (_streams)
