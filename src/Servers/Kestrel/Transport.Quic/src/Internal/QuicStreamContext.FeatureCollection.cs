@@ -78,63 +78,6 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
             _onCompleted.Push(new KeyValuePair<Func<object, Task>, object>(callback, state));
         }
 
-        private Task FireOnCompletedAsync()
-        {
-            var onCompleted = _onCompleted;
-
-            if (onCompleted == null || onCompleted.Count == 0)
-            {
-                return Task.CompletedTask;
-            }
-
-            return CompleteAsyncMayAwait(onCompleted);
-        }
-
-        private Task CompleteAsyncMayAwait(Stack<KeyValuePair<Func<object, Task>, object>> onCompleted)
-        {
-            while (onCompleted.TryPop(out var entry))
-            {
-                try
-                {
-                    var task = entry.Key.Invoke(entry.Value);
-                    if (!task.IsCompletedSuccessfully)
-                    {
-                        return CompleteAsyncAwaited(task, onCompleted);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
-                }
-            }
-
-            return Task.CompletedTask;
-        }
-
-        private async Task CompleteAsyncAwaited(Task currentTask, Stack<KeyValuePair<Func<object, Task>, object>> onCompleted)
-        {
-            try
-            {
-                await currentTask;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
-            }
-
-            while (onCompleted.TryPop(out var entry))
-            {
-                try
-                {
-                    await entry.Key.Invoke(entry.Value);
-                }
-                catch (Exception ex)
-                {
-                    _log.LogError(ex, "An error occurred running an IConnectionCompleteFeature.OnCompleted callback.");
-                }
-            }
-        }
-
         private void InitializeFeatures()
         {
             _currentIPersistentStateFeature = this;

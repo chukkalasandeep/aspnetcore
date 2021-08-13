@@ -607,6 +607,7 @@ namespace Microsoft.AspNetCore.Testing
 
         public bool Disposed => _testStreamContext.Disposed;
         public Task OnDisposedTask => _testStreamContext.OnDisposedTask;
+        public Task OnDisposingTask => _testStreamContext.OnDisposingTask;
 
         public TaskCompletionSource StartStreamDisposeTcs
         {
@@ -999,7 +1000,7 @@ namespace Microsoft.AspNetCore.Testing
         }
     }
 
-    internal class TestStreamContext : ConnectionContext, IStreamDirectionFeature, IStreamIdFeature, IProtocolErrorCodeFeature, IPersistentStateFeature, IStreamAbortFeature
+    internal class TestStreamContext : ConnectionContext, IStreamDirectionFeature, IStreamIdFeature, IProtocolErrorCodeFeature, IPersistentStateFeature, IStreamAbortFeature, IConnectionCompleteFeature
     {
         private readonly Http3InMemory _testBase;
 
@@ -1015,6 +1016,8 @@ namespace Microsoft.AspNetCore.Testing
         // Persistent state collection is not reset with a stream by design.
         private IDictionary<object, object> _persistentState;
 
+        private Stack<KeyValuePair<Func<object, Task>, object>> _onCompleted;
+        private TaskCompletionSource _disposingTcs;
         private TaskCompletionSource _disposedTcs;
 
         public TestStreamContext(bool canRead, bool canWrite, Http3InMemory testBase)
@@ -1063,6 +1066,7 @@ namespace Microsoft.AspNetCore.Testing
             Features.Set<IStreamAbortFeature>(this);
             Features.Set<IProtocolErrorCodeFeature>(this);
             Features.Set<IPersistentStateFeature>(this);
+            Features.Set<IConnectionCompleteFeature>(this);
 
             StreamId = streamId;
             _testBase.Logger.LogInformation($"Initializing stream {streamId}");
@@ -1071,6 +1075,7 @@ namespace Microsoft.AspNetCore.Testing
             AbortWriteException = null;
 
             _disposedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _disposingTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Disposed = false;
         }
 
@@ -1081,6 +1086,7 @@ namespace Microsoft.AspNetCore.Testing
 
         public bool Disposed { get; private set; }
 
+        public Task OnDisposingTask => _disposingTcs.Task;
         public Task OnDisposedTask => _disposedTcs.Task;
 
         public override string ConnectionId { get; set; }
@@ -1117,6 +1123,7 @@ namespace Microsoft.AspNetCore.Testing
 
         public override async ValueTask DisposeAsync()
         {
+            _disposingTcs.TrySetResult();
             if (StartStreamDisposeTcs != null)
             {
                 await StartStreamDisposeTcs.Task;
@@ -1132,6 +1139,8 @@ namespace Microsoft.AspNetCore.Testing
 
             _pair.Transport.Input.Complete();
             _pair.Transport.Output.Complete();
+
+            await ConnectionCompletion.FireOnCompletedAsync(_testBase.Logger, _onCompleted);
 
             if (canReuse)
             {
@@ -1169,6 +1178,15 @@ namespace Microsoft.AspNetCore.Testing
         void IStreamAbortFeature.AbortWrite(long errorCode, ConnectionAbortedException abortReason)
         {
             AbortWriteException = abortReason;
+        }
+
+        public void OnCompleted(Func<object, Task> callback, object state)
+        {
+            if (_onCompleted == null)
+            {
+                _onCompleted = new Stack<KeyValuePair<Func<object, Task>, object>>();
+            }
+            _onCompleted.Push(new KeyValuePair<Func<object, Task>, object>(callback, state));
         }
     }
 }

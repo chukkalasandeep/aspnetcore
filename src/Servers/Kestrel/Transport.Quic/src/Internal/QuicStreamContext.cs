@@ -448,7 +448,7 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Transport.Quic.Internal
                 _stream = null!;
             }
 
-            await FireOnCompletedAsync();
+            await ConnectionCompletion.FireOnCompletedAsync(_log, _onCompleted);
 
             if (!_connection.TryReturnStream(this))
             {

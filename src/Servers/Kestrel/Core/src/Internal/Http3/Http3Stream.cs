@@ -502,13 +502,15 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Internal.Http3
                 }
                 finally
                 {
-                    ApplyCompletionFlag(StreamCompletionFlags.Completed);
-
                     _context.StreamContext.Features.Get<IConnectionCompleteFeature>()!.OnCompleted(static (state) =>
                     {
                         var s = (Http3Stream)state;
+
+                        s.ApplyCompletionFlag(StreamCompletionFlags.Completed);
+
                         // Tells the connection to remove the stream from its active collection.
                         s._context.StreamLifetimeHandler.OnStreamCompleted(s);
+
                         return Task.CompletedTask;
                     }, this);
 

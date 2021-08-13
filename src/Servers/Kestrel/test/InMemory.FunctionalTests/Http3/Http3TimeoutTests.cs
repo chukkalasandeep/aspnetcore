@@ -240,14 +240,10 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
             var limits = _serviceContext.ServerOptions.Limits;
             var mockSystemClock = _serviceContext.MockSystemClock;
 
-            Http3Api._timeoutControl.Initialize(mockSystemClock.UtcNow.Ticks);
+            // Use non-default value to ensure the min request and response rates aren't mixed up.
+            limits.MinResponseDataRate = new MinDataRate(480, TimeSpan.FromSeconds(2.5));
 
-            var requestDelegateStartedTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            await Http3Api.InitializeConnectionAsync(context =>
-            {
-                requestDelegateStartedTcs.SetResult();
-                return Task.CompletedTask;
-            });
+            await Http3Api.InitializeConnectionAsync(_noopApplication);
 
             var inboundControlStream = await Http3Api.GetInboundControlStream();
             await inboundControlStream.ExpectSettingsAsync();
@@ -264,10 +260,16 @@ namespace Microsoft.AspNetCore.Server.Kestrel.Core.Tests
                 new KeyValuePair<string, string>(HeaderNames.Authority, "localhost:80"),
             }, endStream: true);
 
-            await requestDelegateStartedTcs.Task.DefaultTimeout();
+            await requestStream.OnDisposingTask.DefaultTimeout();
 
             Http3Api.TriggerTick(now);
-            //Http3Api.TriggerTick(now + 1);
+            Assert.Equal(0, requestStream.Error);
+
+            Http3Api.TriggerTick(now + TimeSpan.FromTicks(1));
+            Assert.Equal(0, requestStream.Error);
+
+            Http3Api.TriggerTick(now + limits.MinResponseDataRate.GracePeriod + TimeSpan.FromTicks(1));
+            await requestStream.WaitForStreamErrorAsync(Http3ErrorCode.RequestCancelled);
         }
 
         private class EchoAppWithNotification
